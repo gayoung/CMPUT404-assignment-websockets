@@ -14,7 +14,7 @@
 # limitations under the License.
 #
 import flask
-from flask import Flask, request
+from flask import Flask, request, redirect, url_for
 from flask_sockets import Sockets
 import gevent
 from gevent import queue
@@ -33,6 +33,7 @@ class World:
         self.listeners = list()
         
     def add_set_listener(self, listener):
+        print "at add_set_listener"
         self.listeners.append( listener )
 
     def update(self, entity, key, value):
@@ -59,30 +60,78 @@ class World:
     def world(self):
         return self.space
 
-myWorld = World()        
+myWorld = World()
+
+# code taken and modified from
+# https://github.com/abramhindle/WebSocketsExamples
+class Client:
+    def __init__(self):
+        self.queue = queue.Queue()
+    
+    def put(self, v):
+        self.queue.put_nowait(v)
+    
+    def get(self):
+        return self.queue.get()
+
+
+clients = list()
 
 def set_listener( entity, data ):
-    ''' do something with the update ! '''
+    return
 
 myWorld.add_set_listener( set_listener )
         
 @app.route('/')
 def hello():
     '''Return something coherent here.. perhaps redirect to /static/index.html '''
-    return None
+    return redirect(url_for('static', filename='index.html'))
 
+# code taken and modified from
+# https://github.com/abramhindle/WebSocketsExamples
 def read_ws(ws,client):
     '''A greenlet function that reads from the websocket and updates the world'''
-    # XXX: TODO IMPLEMENT ME
-    return None
+    try:
+        while True:
+            msg = ws.receive()
+            if (msg is not None):
+                packet = json.loads(msg)
+                for client in clients:
+                    client.put( packet )
+            else:
+                break
+    except Exception as e:
+        clients.remove(client)
+        gevent.kill(g)
 
+# code taken and modified from
+# https://github.com/abramhindle/WebSocketsExamples
 @sockets.route('/subscribe')
 def subscribe_socket(ws):
     '''Fufill the websocket URL of /subscribe, every update notify the
        websocket and read updates from the websocket '''
-    # XXX: TODO IMPLEMENT ME
-    return None
+    client = Client()
+    clients.append(client)
+    g = gevent.spawn( read_ws, ws, client )
+    try:
+        while True:
+            msg = client.get()
+            if "new" in msg:
+                ws.send(json.dumps(myWorld.world()))
+            else:
+                for key in msg:
+                    if "data" in key:
+                        data = msg[key]
+                    else:
+                        entity = msg[key]
+                        myWorld.set(entity, data)
+                        ws.send(json.dumps(data))
 
+    except Exception as e:# WebSocketError as e:
+        print "WS Error %s" % e
+    finally:
+        clients.remove(client)
+        gevent.kill(g)
 
 def flask_post_json():
     '''Ah the joys of frameworks! They do so much work for you
@@ -96,24 +145,28 @@ def flask_post_json():
 
 @app.route("/entity/<entity>", methods=['POST','PUT'])
 def update(entity):
-    '''update the entities via this interface'''
-    return None
+    entityvalue = flask_post_json()
+    myWorld.set(entity, entityvalue)
+    return json.dumps(entityvalue)
 
-@app.route("/world", methods=['POST','GET'])    
+@app.route("/world", methods=['POST','GET'])
 def world():
-    '''you should probably return the world here'''
-    return None
+    entities = {}
+    current_world = myWorld.world()
+    return json.dumps(current_world)
 
-@app.route("/entity/<entity>")    
+@app.route("/entity/<entity>")
 def get_entity(entity):
     '''This is the GET version of the entity interface, return a representation of the entity'''
-    return None
-
+    data = myWorld.get(entity)
+    return json.dumps(data)
 
 @app.route("/clear", methods=['POST','GET'])
 def clear():
     '''Clear the world out!'''
-    return None
+    current_world = myWorld.clear()
+    return json.dumps(current_world)
+
 
 
 
@@ -123,4 +176,5 @@ if __name__ == "__main__":
         and run
         gunicorn -k flask_sockets.worker sockets:app
     '''
-    app.run()
+#app.run()
+    os.system("bash run.sh");
