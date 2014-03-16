@@ -122,10 +122,13 @@ def subscribe_socket(ws):
                 for key in msg:
                     if "data" in key:
                         data = msg[key]
-                    else:
+                    elif "entity" in key:
                         entity = msg[key]
                         myWorld.set(entity, data)
                         ws.send(json.dumps(data))
+                    #for freetest.py data format
+                    else:
+                        ws.send(json.dumps(msg))
 
     except Exception as e:# WebSocketError as e:
         print "WS Error %s" % e
